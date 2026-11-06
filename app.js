@@ -8,7 +8,7 @@ import { readSourceDates, chooseDate, quickTimeDateString } from './lib/mp4date.
 import { summaryFromBytes } from './lib/timeline.js';
 
 const $ = (id) => document.getElementById(id);
-const PAGE_VERSION = 'phase1-run5';
+const PAGE_VERSION = 'phase1-run6';
 const freshR = () => ({ env: { version: PAGE_VERSION }, control: {}, date: {}, picker: {}, hash: {}, hashAll: {}, lookalike: {}, video: {}, save: {}, install: {}, interrupted: [], backgrounded: [], loads: 0 });
 let store = null;
 try { store = window.localStorage; } catch (e) { store = null; }
@@ -583,13 +583,14 @@ $('dateVideoPicker').addEventListener('change', (e) => tracked('date-read', asyn
     lastModified: dateVideo.lastModified ? new Date(dateVideo.lastModified).toISOString() : null,
     mvhd: src.mvhd, creationdate: src.creationdate, hasLocation: !!src.location, hasUdtaLocation: src.hasUdtaLocation,
     usedFrom: dateChoice ? dateChoice.from : 'no date found', written,
+    mvhdLooksLikeExport: dateChoice ? dateChoice.mvhdLooksLikeExport : null,
   };
   const L = (v) => '⁦' + v + '⁩'; // keep dates and numbers left-to-right inside Hebrew lines
   $('dateInfo').textContent =
     `גודל: ${L(fmtMB(dateVideo.size))}\n` +
     `כותרת הקובץ נמצאה: ${src.found ? 'כן' : 'לא'}\n` +
     `זמן "שינוי אחרון" של הקובץ (לא אמין): ${L(R.date.source.lastModified || 'אין')}\n` +
-    `זמן יצירה בכותרת הקובץ: ${L(src.mvhd || 'אין')}\n` +
+    `זמן יצירה בכותרת הקובץ: ${L(src.mvhd || 'אין')}${R.date.source.mvhdLooksLikeExport ? ' (נראה כמו זמן הייצוא של הבורר, לא תאריך הצילום)' : ''}\n` +
     `תאריך יצירה של QuickTime: ${L(src.creationdate || 'אין')}\n` +
     `מיקום בקובץ: ${src.location ? 'יש' : (src.hasUdtaLocation ? 'יש (בצורה אחרת)' : 'אין')}\n` +
     `התאריך שייכתב: ${L(written || 'אין')}\nמקור התאריך: ${L(R.date.source.usedFrom)}`;
