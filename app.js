@@ -3,10 +3,13 @@ import { groupBySize, groupByHash, summarizeGroups, dhashFromGray, lookAlikeStat
 import { buildReport, fmtMB } from './lib/report.js';
 import { saveState, loadState, clearState, markInflight, bumpHidden, readInflight, clearInflight, interruptionNote, mergeState } from './lib/persist.js';
 import { compressA } from './videoA.js';
+import { analyzeControl, verdictHebrew, shortFp, controlReportData } from './lib/control.js';
+import { readSourceDates, chooseDate, quickTimeDateString } from './lib/mp4date.js';
+import { summaryFromBytes } from './lib/timeline.js';
 
 const $ = (id) => document.getElementById(id);
-const PAGE_VERSION = 'phase1-run3';
-const freshR = () => ({ env: { version: PAGE_VERSION }, picker: {}, hash: {}, hashAll: {}, lookalike: {}, video: {}, save: {}, install: {}, interrupted: [], backgrounded: [], loads: 0 });
+const PAGE_VERSION = 'phase1-run5';
+const freshR = () => ({ env: { version: PAGE_VERSION }, control: {}, date: {}, picker: {}, hash: {}, hashAll: {}, lookalike: {}, video: {}, save: {}, install: {}, interrupted: [], backgrounded: [], loads: 0 });
 let store = null;
 try { store = window.localStorage; } catch (e) { store = null; }
 
@@ -130,6 +133,43 @@ async function envInit() {
     '\napp quota (NOT phone storage): ' + R.env.quota;
   refreshReport();
 }
+
+// ---------- T. controlled test (few photos, show why copies are or are not identical) ----------
+$('ctlPicker').addEventListener('change', (e) => tracked('controlled-test', async () => {
+  const list = [...e.target.files].slice(0, 12);
+  e.target.value = '';
+  const items = [];
+  const cards = $('ctlCards');
+  cards.textContent = '';
+  for (const f of list) {
+    const buf = await f.arrayBuffer();
+    const dig = await crypto.subtle.digest('SHA-256', buf);
+    const hash = [...new Uint8Array(dig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    let dh = null;
+    try { dh = await grayHash(f); } catch (err) { dh = null; }
+    items.push({ type: f.type, size: f.size, hash, dh });
+    const card = document.createElement('div');
+    card.className = 'paircard';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(f);
+    img.style.cssText = 'width:90px;height:90px;object-fit:cover;border-radius:8px;float:right;margin-left:10px';
+    const txt = document.createElement('pre');
+    txt.textContent = `תמונה ${items.length}
+סוג: ${f.type || '?'}
+גודל: ${f.size} בייט (${(f.size / 1048576).toFixed(2)} MB)
+טביעת אצבע: ${shortFp(hash)}`;
+    card.append(img, txt);
+    cards.appendChild(card);
+  }
+  const a = analyzeControl(items);
+  const v = $('ctlVerdict');
+  v.hidden = false;
+  v.textContent = items.length < 2 ? 'בחר לפחות 2 תמונות.' : verdictHebrew(items, a);
+  v.style.whiteSpace = 'pre-line';
+  R.control = controlReportData(items, a);
+  $('ctlOut').textContent = (list.length === 12 ? 'נבדקו 12 התמונות הראשונות. ' : '') + 'טביעת אצבע זהה = אותו קובץ בדיוק.';
+  refreshReport();
+}));
 
 // ---------- A. picker ----------
 function showPicks() {
@@ -365,7 +405,7 @@ function addResultCard(method, blob) {
   const vid = document.createElement('video');
   vid.src = url; vid.controls = true; vid.playsInline = true;
   const sz = document.createElement('p');
-  sz.textContent = `${fmtMB(rec.inBytes)} ← ${fmtMB(blob.size)}`;
+  sz.className = 'sizeline'; sz.textContent = `${fmtMB(rec.inBytes)} ← ${fmtMB(blob.size)}`;
   const q1 = document.createElement('p');
   q1.append('האם הסרטון מתנגן? ', makeYN(() => rec.plays, (v) => { rec.plays = v; }));
   const q2 = document.createElement('p');
@@ -373,7 +413,7 @@ function addResultCard(method, blob) {
   const save = document.createElement('button');
   save.textContent = 'שמור ל"תמונות" (שיטה ' + (method === 'methodA' ? 'א' : 'ב') + ')';
   save.onclick = () => saveBlob(method);
-  card.append(h, vid, sz, q1, q2, save);
+  card.append(h, vid, sz, q1, q2, syncQuestion(rec), save);
   $('videoResults').appendChild(card);
   outs[method] = { blob, url, card };
 }
@@ -392,7 +432,7 @@ $('methodA').addEventListener('click', () => tracked('video-method-A', async () 
     Object.assign(rec, {
       status: r.blob.size < videoFile.size ? 'ok, smaller' : 'ok but NOT smaller',
       outBytes: r.blob.size, seconds: Math.round((performance.now() - t0) / 100) / 10,
-      sound: r.audioNote, format: 'mp4 H.264 ' + r.outW + 'x' + r.outH,
+      sound: r.audioNote, format: 'mp4 H.264 ' + r.outW + 'x' + r.outH, sync: r.sync,
     });
     addResultCard('methodA', r.blob);
     $('vidOut').textContent = notes.concat([
@@ -462,6 +502,13 @@ $('methodB').addEventListener('click', () => tracked('video-method-B', async () 
     rec2.stop();
     await done;
     const outBlob = new Blob(chunks, { type: mime.split(';')[0] });
+    // measure the sound/picture timing of the recording when it is an MP4 (a WebM cannot be read here)
+    if (outBlob.type === 'video/mp4') {
+      try {
+        const mp4box = await import('./vendor/mp4box/mp4box.all.js');
+        rec.sync = { source: null, output: await summaryFromBytes(mp4box, new Uint8Array(await outBlob.arrayBuffer())) };
+      } catch (e) { rec.sync = null; }
+    }
     Object.assign(rec, {
       status: outBlob.size < videoFile.size ? 'ok, smaller' : 'ok but NOT smaller',
       outBytes: outBlob.size, seconds: Math.round((performance.now() - t0) / 100) / 10, sound, format: mime,
@@ -478,6 +525,135 @@ $('methodB').addEventListener('click', () => tracked('video-method-B', async () 
     refreshReport();
   }
 }));
+
+// ---------- D2. date test: does the saved copy keep the original date? (plans/date-test-plan.md) ----------
+let dateVideo = null, dateChoice = null;
+const dateOuts = {}; // 'withFix' | 'control' -> {url, card}
+
+function makeChoice(options, get, set) { // options: [[value, label]]
+  const wrap = document.createElement('span');
+  wrap.className = 'yn';
+  const btns = options.map(([val, label]) => {
+    const b = document.createElement('button');
+    b.className = 'ynbtn';
+    b.onclick = () => { set(val); paint(); refreshReport(); };
+    return [b, val, label];
+  });
+  function paint() {
+    for (const [b, val, label] of btns) {
+      const sel = get() === val;
+      b.classList.toggle('selected', sel);
+      b.classList.toggle('yes', sel);
+      b.setAttribute('aria-pressed', String(sel));
+      b.textContent = (sel ? '✓ ' : '') + label;
+    }
+  }
+  btns.forEach(([b]) => wrap.appendChild(b));
+  paint();
+  return wrap;
+}
+
+// "Is the sound in sync with the picture?" for a result card; the answer goes into the report next to the measured numbers.
+function syncQuestion(rec) {
+  const p = document.createElement('p');
+  p.append('האם הקול מסונכרן עם התמונה? ',
+    makeChoice([['synced', 'כן, מסונכרן'], ['slight', 'עיכוב קל'], ['big', 'עיכוב גדול']], () => rec.syncAnswer, (v) => { rec.syncAnswer = v; }));
+  return p;
+}
+
+async function shareBlob(blob, name) {
+  const f = new File([blob], name, { type: blob.type });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f] }); return true; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    return 'share not available, tried download';
+  } catch (e) { return e.name === 'AbortError' ? 'opened then cancelled' : 'error ' + e.name; }
+}
+
+$('dateVideoPicker').addEventListener('change', (e) => tracked('date-read', async () => {
+  dateVideo = e.target.files[0] || null;
+  e.target.value = '';
+  if (!dateVideo) return;
+  const src = await readSourceDates(dateVideo);
+  dateChoice = chooseDate(src, dateVideo.lastModified, (d) => -d.getTimezoneOffset());
+  const written = dateChoice ? (dateChoice.creationdate || quickTimeDateString(dateChoice.date, dateChoice.offsetMinutes)) : null;
+  R.date.source = {
+    found: src.found,
+    lastModified: dateVideo.lastModified ? new Date(dateVideo.lastModified).toISOString() : null,
+    mvhd: src.mvhd, creationdate: src.creationdate, hasLocation: !!src.location, hasUdtaLocation: src.hasUdtaLocation,
+    usedFrom: dateChoice ? dateChoice.from : 'no date found', written,
+  };
+  const L = (v) => '⁦' + v + '⁩'; // keep dates and numbers left-to-right inside Hebrew lines
+  $('dateInfo').textContent =
+    `גודל: ${L(fmtMB(dateVideo.size))}\n` +
+    `כותרת הקובץ נמצאה: ${src.found ? 'כן' : 'לא'}\n` +
+    `זמן "שינוי אחרון" של הקובץ (לא אמין): ${L(R.date.source.lastModified || 'אין')}\n` +
+    `זמן יצירה בכותרת הקובץ: ${L(src.mvhd || 'אין')}\n` +
+    `תאריך יצירה של QuickTime: ${L(src.creationdate || 'אין')}\n` +
+    `מיקום בקובץ: ${src.location ? 'יש' : (src.hasUdtaLocation ? 'יש (בצורה אחרת)' : 'אין')}\n` +
+    `התאריך שייכתב: ${L(written || 'אין')}\nמקור התאריך: ${L(R.date.source.usedFrom)}`;
+  $('dateBtnFix').disabled = !dateChoice;
+  $('dateBtnCtl').disabled = false;
+  refreshReport();
+}));
+
+function addDateCard(kind, blob, rec) {
+  const old = dateOuts[kind];
+  if (old) { URL.revokeObjectURL(old.url); old.card.remove(); }
+  const url = URL.createObjectURL(blob);
+  const card = document.createElement('div');
+  card.className = 'paircard';
+  const title = kind === 'withFix' ? 'עותק עם תיקון התאריך' : 'עותק בלי תיקון (השוואה)';
+  const h = document.createElement('h3'); h.textContent = title;
+  const vid = document.createElement('video'); vid.src = url; vid.controls = true; vid.playsInline = true;
+  const sz = document.createElement('p'); sz.className = 'sizeline'; sz.textContent = `${fmtMB(rec.inBytes)} ← ${fmtMB(blob.size)}`;
+  const q1 = document.createElement('p'); q1.append('האם הסרטון מתנגן? ', makeYN(() => rec.plays, (v) => { rec.plays = v; }));
+  const q2 = document.createElement('p'); q2.append('האם יש בו קול? ', makeYN(() => rec.heardSound, (v) => { rec.heardSound = v; }));
+  const save = document.createElement('button');
+  save.textContent = 'שמור ל"תמונות" (שיתוף, ואז "שמור סרטון")';
+  save.onclick = async () => { rec.shareOpened = await shareBlob(blob, kind === 'withFix' ? 'date-fixed.mp4' : 'date-control.mp4'); refreshReport(); };
+  const q3 = document.createElement('p');
+  q3.append('אחרי השמירה, באפליקציית תמונות: איזה תאריך מוצג לעותק הזה? ',
+    makeChoice([['original', 'המקורי'], ['today', 'היום'], ['other', 'אחר']], () => rec.photosDate, (v) => { rec.photosDate = v; }));
+  const q4 = document.createElement('p');
+  q4.append('האם הוא נמצא במקום הנכון בספרייה (לפי התאריך)? ', makeYN(() => rec.rightPlace, (v) => { rec.rightPlace = v; }));
+  card.append(h, vid, sz, q1, q2, syncQuestion(rec), save, q3, q4);
+  $('dateCards').appendChild(card);
+  dateOuts[kind] = { url, card };
+}
+
+async function runDate(kind) {
+  const rec = { status: 'started', inBytes: dateVideo.size };
+  R.date[kind] = rec;
+  refreshReport();
+  const prog = $('dateProg');
+  prog.hidden = false; prog.value = 0; prog.max = 1;
+  const t0 = performance.now();
+  const notes = [];
+  await keepAwake();
+  try {
+    const r = await compressA(dateVideo, {
+      onProgress: (p) => { prog.value = p; }, log: (m) => notes.push(m),
+      originalDate: kind === 'withFix' ? dateChoice : null, moovLast: true,
+    });
+    Object.assign(rec, {
+      status: r.blob.size < dateVideo.size ? 'ok, smaller' : 'ok but NOT smaller',
+      outBytes: r.blob.size, seconds: Math.round((performance.now() - t0) / 100) / 10, sound: r.audioNote, sync: r.sync,
+    });
+    addDateCard(kind, r.blob, rec);
+    $('dateOut').textContent = notes.concat([`in: ${fmtMB(rec.inBytes)}`, `out: ${fmtMB(rec.outBytes)}`, `seconds: ${rec.seconds}`, `sound: ${rec.sound}`, `date: ${r.dateNote}`, `status: ${rec.status}`]).join('\n');
+  } catch (err) {
+    rec.status = 'failed: ' + (err && err.message || err);
+    $('dateOut').textContent = notes.concat([rec.status]).join('\n');
+  } finally {
+    releaseAwake();
+    prog.hidden = true;
+    refreshReport();
+  }
+}
+$('dateBtnFix').addEventListener('click', () => tracked('date-with-fix', () => runDate('withFix')));
+$('dateBtnCtl').addEventListener('click', () => tracked('date-control', () => runDate('control')));
 
 // ---------- D. save / Photos ----------
 async function saveBlob(method) {

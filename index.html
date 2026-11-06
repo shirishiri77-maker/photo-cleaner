@@ -16,7 +16,7 @@
 <body>
 <header>
   <h1>בדיקת מנקה התמונות</h1>
-  <p class="note">גרסת הדף: <b id="ver">phase1-run3</b> (אם כתוב אחרת, סגור את האפליקציה לגמרי ופתח שוב)</p>
+  <p class="note">גרסת הדף: <b id="ver">phase1-run5</b> (אם כתוב אחרת, סגור את האפליקציה לגמרי ופתח שוב)</p>
   <p>דף בדיקה בלבד. הוא רק מודד ומציג מספרים. הוא לא מוחק כלום, לא שומר תמונות, ושום דבר לא יוצא מהטלפון.</p>
 </header>
 
@@ -39,6 +39,29 @@
   <h2>התקנה ושימוש בלי אינטרנט</h2>
   <p>לחץ על כפתור השיתוף של Safari ואז "הוסף למסך הבית". פתח את האייקון החדש. אחר כך סגור, העבר למצב טיסה ופתח שוב.</p>
   <p>האם נפתח בלי אינטרנט? <span class="yn" data-key="offline"></span></p>
+  <button class="copyBtn">העתק תוצאות</button>
+</section>
+
+<section id="secT">
+  <h2>בדיקה מבוקרת: האם עותקים זהים נמצאים?</h2>
+  <p>בחר 4 עד 8 תמונות: תמונה ושכפול שלה מתוך אפליקציית תמונות, ותמונה ועותק שלה ששמרת מוואטסאפ. הדף יגיד אם הוא מצא עותקים זהים, ואם לא, יראה למה.</p>
+  <label class="btn"><input id="ctlPicker" type="file" accept="image/*" multiple hidden>בחר תמונות לבדיקה</label>
+  <div id="ctlVerdict" class="pairhead" hidden></div>
+  <div id="ctlCards"></div>
+  <pre id="ctlOut"></pre>
+  <button class="copyBtn">העתק תוצאות</button>
+</section>
+
+<section id="secDate">
+  <h2>בדיקת תאריך וקול (וידאו קצר)</h2>
+  <p>בחר סרטון קצר (10 עד 30 שניות) <b>עם קול</b>, שצולם לפני כמה ימים. קודם, באפליקציית תמונות, רשום לעצמך את התאריך והשעה שלו. המסך חייב להישאר דלוק.</p>
+  <label class="btn"><input id="dateVideoPicker" type="file" accept="video/*" hidden>בחר סרטון לבדיקת תאריך</label>
+  <pre id="dateInfo" class="rtlpre"></pre>
+  <button id="dateBtnFix" disabled>דחוס ושמור את התאריך המקורי</button>
+  <button id="dateBtnCtl" disabled>דחוס בלי תיקון תאריך (להשוואה)</button>
+  <progress id="dateProg" value="0" max="1" hidden></progress>
+  <pre id="dateOut"></pre>
+  <div id="dateCards"></div>
   <button class="copyBtn">העתק תוצאות</button>
 </section>
 
