@@ -1,22 +1,101 @@
 // Phase 1 measurement page. Measures only. No network, no storage of photos.
 import { groupBySize, groupByHash, summarizeGroups, dhashFromGray, lookAlikeStats } from './lib/grouping.js';
 import { buildReport, fmtMB } from './lib/report.js';
+import { saveState, loadState, clearState, markInflight, bumpHidden, readInflight, clearInflight, interruptionNote, mergeState } from './lib/persist.js';
 import { compressA } from './videoA.js';
 
 const $ = (id) => document.getElementById(id);
-const PAGE_VERSION = 'phase1-run2';
-const R = { env: { version: PAGE_VERSION }, picker: {}, hash: {}, hashAll: {}, lookalike: {}, video: {}, save: {}, install: {} };
-let files = []; // accumulated picks: {id, file}
+const PAGE_VERSION = 'phase1-run3';
+const freshR = () => ({ env: { version: PAGE_VERSION }, picker: {}, hash: {}, hashAll: {}, lookalike: {}, video: {}, save: {}, install: {}, interrupted: [], backgrounded: [], loads: 0 });
+let store = null;
+try { store = window.localStorage; } catch (e) { store = null; }
+
+// ---- saved results from earlier page loads (the page can be reloaded or closed by iOS) ----
+const saved = store ? loadState(store) : null;
+let R = mergeState(freshR(), saved);
+R.interrupted = R.interrupted || []; R.backgrounded = R.backgrounded || [];
+R.loads = (R.loads || 0) + 1;
+const inflight = store ? readInflight(store) : null;
+const note = interruptionNote(inflight);
+if (note) {
+  R.interrupted.push(note);
+  clearInflight(store);
+  const w = $('interruptedInfo');
+  w.hidden = false;
+  w.textContent = 'שים לב: הדף נסגר או נטען מחדש באמצע שלב: ' + note + '. זה מידע חשוב, הוא נכנס לדוח.';
+}
+
+let files = []; // accumulated picks (in memory only): {id, file}
 let nextId = 1;
 let contentHashes = new Map(); // id -> sha256 hex
 let videoFile = null;
-let outBlob = null;
-let outUrl = null;
+let pickedThisLoad = false;
+const outs = {}; // method -> {blob, url, card}
 const verdicts = [];
 
 function isPhoto(f) { return /^image\//.test(f.type) || /\.(jpe?g|heic|heif|png|gif|webp)$/i.test(f.name || ''); }
 function isVideo(f) { return /^video\//.test(f.type) || /\.(mov|mp4|m4v)$/i.test(f.name || ''); }
-function refreshReport() { $('reportOut').textContent = buildReport(R); }
+
+function refreshReport() {
+  const text = buildReport(R);
+  $('reportOut').textContent = text;
+  $('topReport').textContent = text;
+  const ok = store ? saveState(store, R) : false;
+  const t = new Date().toLocaleTimeString('he-IL');
+  $('savedInfo').textContent = ok
+    ? `נשמר במכשיר ב-${t}. אם הדף ייסגר, התוצאות יחכו כאן. הדף נטען ${R.loads} פעמים.`
+    : 'לא ניתן לשמור במכשיר. העתק תוצאות ידנית אחרי כל חלק.';
+}
+
+// Marks a long step so that, if the page dies, the next load knows which step it was.
+async function tracked(step, fn) {
+  if (store) markInflight(store, step);
+  try { return await fn(); }
+  finally {
+    if (store) {
+      const inf = readInflight(store);
+      if (inf && inf.hidden > 0) R.backgrounded.push(step + ' x' + inf.hidden);
+      clearInflight(store);
+    }
+  }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && store) bumpHidden(store); });
+
+// ---------- yes / no buttons with a visible selected state ----------
+function makeYN(get, set) {
+  const wrap = document.createElement('span');
+  wrap.className = 'yn';
+  const mk = (label, val, cls) => {
+    const b = document.createElement('button');
+    b.className = 'ynbtn ' + cls;
+    b.dataset.val = val;
+    b.onclick = () => { set(val); paint(); refreshReport(); };
+    return b;
+  };
+  const bY = mk('כן', true, 'yes'), bN = mk('לא', false, 'no');
+  function paint() {
+    const v = get();
+    for (const [b, val, label] of [[bY, true, 'כן'], [bN, false, 'לא']]) {
+      const sel = v === val;
+      b.classList.toggle('selected', sel);
+      b.setAttribute('aria-pressed', String(sel));
+      b.textContent = (sel ? '✓ ' : '') + label;
+    }
+  }
+  wrap.append(bY, bN);
+  paint();
+  return wrap;
+}
+const staticAnswers = {
+  offline: [() => R.install.offline, (v) => { R.install.offline = v; }],
+  saveSeen: [() => R.save.saveSeen, (v) => { R.save.saveSeen = v; }],
+  landed: [() => R.save.landed, (v) => { R.save.landed = v; }],
+  photosOpened: [() => R.save.photosOpened, (v) => { R.save.photosOpened = v; }],
+};
+document.querySelectorAll('.yn[data-key]').forEach((el) => {
+  const [g, s] = staticAnswers[el.dataset.key];
+  el.replaceWith(makeYN(g, s));
+});
 
 // ---------- F. environment ----------
 async function envInit() {
@@ -76,6 +155,7 @@ function showPicks() {
 }
 $('picker').addEventListener('change', (e) => {
   const t0 = performance.now();
+  if (!pickedThisLoad) { R.picker = {}; pickedThisLoad = true; } // measurements describe this page load
   const list = [...e.target.files];
   for (const f of list) files.push({ id: nextId++, file: f });
   R.picker.picks = (R.picker.picks || 0) + 1;
@@ -83,10 +163,10 @@ $('picker').addEventListener('change', (e) => {
   e.target.value = '';
   showPicks();
 });
-$('clearPicks').addEventListener('click', () => { files = []; contentHashes = new Map(); showPicks(); });
+$('clearPicks').addEventListener('click', () => { files = []; contentHashes = new Map(); R.picker = {}; showPicks(); });
 
 // ---------- B. exact duplicates ----------
-$('hashBtn').addEventListener('click', async () => {
+$('hashBtn').addEventListener('click', () => tracked('exact-duplicates', async () => {
   const photos = files.filter((x) => isPhoto(x.file)).map((x) => ({ id: x.id, size: x.file.size, file: x.file }));
   const candidates = groupBySize(photos).flat();
   const prog = $('hashProg');
@@ -116,12 +196,10 @@ $('hashBtn').addEventListener('click', async () => {
     `exact groups: ${sum.groups}\nextra copies: ${sum.extraCopies}\nsize of extra copies: ${fmtMB(sum.extraBytes)}`;
   prog.hidden = true;
   refreshReport();
-});
+}));
 
 // ---------- B1b. hashing speed on ALL photos (measurement) ----------
-// The exact-duplicate step only hashes photos that share a size with another photo, so with few
-// duplicates it hashes almost nothing. This button hashes every photo to measure real speed.
-$('hashAllBtn').addEventListener('click', async () => {
+$('hashAllBtn').addEventListener('click', () => tracked('hash-all-speed', async () => {
   const photos = files.filter((x) => isPhoto(x.file));
   const prog = $('hashProg');
   prog.hidden = false; prog.max = Math.max(1, photos.length); prog.value = 0;
@@ -147,7 +225,7 @@ $('hashAllBtn').addEventListener('click', async () => {
   $('hashAllOut').textContent = `photos hashed: ${photos.length} (failed ${failed})\nseconds: ${R.hashAll.seconds}\nphotos per second: ${R.hashAll.perSecond}\ndata read: ${fmtMB(bytes)}`;
   prog.hidden = true;
   refreshReport();
-});
+}));
 
 // ---------- B2. look-alikes (measurement only) ----------
 async function grayHash(file) {
@@ -162,7 +240,7 @@ async function grayHash(file) {
   for (let i = 0; i < 72; i++) gray.push(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
   return dhashFromGray(gray);
 }
-$('lookBtn').addEventListener('click', async () => {
+$('lookBtn').addEventListener('click', () => tracked('look-alikes', async () => {
   const photos = files.filter((x) => isPhoto(x.file));
   const prog = $('lookProg');
   prog.hidden = false; prog.max = photos.length; prog.value = 0;
@@ -189,26 +267,27 @@ $('lookBtn').addEventListener('click', async () => {
   prog.hidden = true;
   renderPairs(stats.samples);
   refreshReport();
-});
+}));
 function renderPairs(samples) {
   const box = $('pairs');
   box.textContent = '';
   const byId = new Map(files.map((x) => [x.id, x.file]));
   verdicts.length = 0;
-  let answered = 0;
   const total = samples.length;
   const head = document.createElement('p');
   head.className = 'pairhead';
   const upd = () => {
+    const answered = verdicts.filter(Boolean).length;
     head.textContent = total
-      ? `עכשיו תורך: לכל זוג תמונות למטה לחץ "אותה תמונה" או "תמונות שונות". נענו ${answered} מתוך ${total}.`
+      ? `עכשיו תורך: לכל זוג תמונות למטה לחץ "אותה תמונה" או "תמונות שונות". אפשר לתקן תשובה. נענו ${answered} מתוך ${total}.`
       : 'לא נמצאו זוגות דומים להציג.';
     R.lookalike.examplesShown = total;
     R.lookalike.examplesAnswered = answered;
+    R.lookalike.verdicts = verdicts.slice();
   };
   box.appendChild(head);
   upd();
-  for (const s of samples) {
+  samples.forEach((s, idx) => {
     const card = document.createElement('div');
     card.className = 'paircard';
     const imgs = document.createElement('div');
@@ -224,24 +303,29 @@ function renderPairs(samples) {
     card.appendChild(label);
     const btns = document.createElement('div');
     btns.className = 'verdicts';
-    for (const [txt, same] of [['אותה תמונה', 'same'], ['תמונות שונות', 'different']]) {
+    const mk = (txt, val, cls) => {
       const b = document.createElement('button');
-      b.className = same === 'same' ? 'yes' : 'no';
-      b.textContent = txt;
-      b.onclick = () => {
-        verdicts.push(s.dist + ':' + same);
-        R.lookalike.verdicts = verdicts.slice();
-        btns.querySelectorAll('button').forEach((x) => (x.disabled = true));
-        card.classList.add('answered');
-        answered++;
-        upd();
-        refreshReport();
-      };
-      btns.appendChild(b);
-    }
+      b.className = 'ynbtn ' + cls;
+      b.dataset.txt = txt;
+      b.onclick = () => { verdicts[idx] = s.dist + ':' + val; paint(); upd(); refreshReport(); };
+      return [b, val, txt];
+    };
+    const items = [mk('אותה תמונה', 'same', 'yes'), mk('תמונות שונות', 'different', 'no')];
+    const paint = () => {
+      const cur = verdicts[idx] ? verdicts[idx].split(':')[1] : null;
+      card.classList.toggle('answered', !!cur);
+      for (const [b, val, txt] of items) {
+        const sel = cur === val;
+        b.classList.toggle('selected', sel);
+        b.setAttribute('aria-pressed', String(sel));
+        b.textContent = (sel ? '✓ ' : '') + txt;
+      }
+    };
+    items.forEach(([b]) => btns.appendChild(b));
+    paint();
     card.appendChild(btns);
     box.appendChild(card);
-  }
+  });
 }
 
 // ---------- C. video ----------
@@ -259,28 +343,47 @@ $('videoPicker').addEventListener('change', (e) => {
     URL.revokeObjectURL(url);
   };
   v.onerror = () => { $('videoInfo').textContent = 'cannot read this video'; };
-  $('methodB').disabled = false;
   $('methodA').disabled = false;
+  $('methodB').disabled = false;
   $('vidOut').textContent = '';
-  refreshReport();
 });
 
-function showOut(blob) {
-  outBlob = blob;
-  if (outUrl) URL.revokeObjectURL(outUrl);
-  outUrl = URL.createObjectURL(outBlob);
-  $('outVideo').src = outUrl; $('outVideo').hidden = false; $('playQ').hidden = false;
-  $('saveBtn').disabled = false;
-}
-let lastMethod = 'methodB';
+let wake = null;
+async function keepAwake() { try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* ignore */ } }
+function releaseAwake() { try { if (wake) wake.release(); } catch (e) { /* ignore */ } wake = null; }
 
-$('methodA').addEventListener('click', async () => {
-  lastMethod = 'methodA';
+// One result card per method, each with its own yes/no answers and its own save button.
+function addResultCard(method, blob) {
+  const rec = R.video[method];
+  const old = outs[method];
+  if (old) { URL.revokeObjectURL(old.url); old.card.remove(); }
+  const url = URL.createObjectURL(blob);
+  const card = document.createElement('div');
+  card.className = 'paircard';
+  const h = document.createElement('h3');
+  h.textContent = method === 'methodA' ? 'תוצאה: שיטה א' : 'תוצאה: שיטה ב';
+  const vid = document.createElement('video');
+  vid.src = url; vid.controls = true; vid.playsInline = true;
+  const sz = document.createElement('p');
+  sz.textContent = `${fmtMB(rec.inBytes)} ← ${fmtMB(blob.size)}`;
+  const q1 = document.createElement('p');
+  q1.append('האם הסרטון מתנגן? ', makeYN(() => rec.plays, (v) => { rec.plays = v; }));
+  const q2 = document.createElement('p');
+  q2.append('האם יש בו קול? ', makeYN(() => rec.heardSound, (v) => { rec.heardSound = v; }));
+  const save = document.createElement('button');
+  save.textContent = 'שמור ל"תמונות" (שיטה ' + (method === 'methodA' ? 'א' : 'ב') + ')';
+  save.onclick = () => saveBlob(method);
+  card.append(h, vid, sz, q1, q2, save);
+  $('videoResults').appendChild(card);
+  outs[method] = { blob, url, card };
+}
+
+$('methodA').addEventListener('click', () => tracked('video-method-A', async () => {
   const rec = { status: 'started', inBytes: videoFile.size, duration: Math.round(videoFile.__dur || 0) };
   R.video.methodA = rec;
+  refreshReport();
   const prog = $('vidProg');
   prog.hidden = false; prog.value = 0; prog.max = 1;
-  $('outVideo').hidden = true; $('playQ').hidden = true;
   const t0 = performance.now();
   const notes = [];
   await keepAwake();
@@ -291,7 +394,7 @@ $('methodA').addEventListener('click', async () => {
       outBytes: r.blob.size, seconds: Math.round((performance.now() - t0) / 100) / 10,
       sound: r.audioNote, format: 'mp4 H.264 ' + r.outW + 'x' + r.outH,
     });
-    showOut(r.blob);
+    addResultCard('methodA', r.blob);
     $('vidOut').textContent = notes.concat([
       `in: ${fmtMB(rec.inBytes)}`, `out: ${fmtMB(rec.outBytes)}`, `seconds: ${rec.seconds}`,
       `sound: ${rec.sound}`, `status: ${rec.status}`]).join('\n');
@@ -304,19 +407,14 @@ $('methodA').addEventListener('click', async () => {
     prog.hidden = true;
     refreshReport();
   }
-});
+}));
 
-let wake = null;
-async function keepAwake() { try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* ignore */ } }
-function releaseAwake() { try { if (wake) wake.release(); } catch (e) { /* ignore */ } wake = null; }
-
-$('methodB').addEventListener('click', async () => {
-  lastMethod = 'methodB';
+$('methodB').addEventListener('click', () => tracked('video-method-B', async () => {
   const rec = { status: 'started', inBytes: videoFile.size, duration: Math.round(videoFile.__dur || 0) };
   R.video.methodB = rec;
+  refreshReport();
   const prog = $('vidProg');
   prog.hidden = false; prog.value = 0; prog.max = 1;
-  $('outVideo').hidden = true; $('playQ').hidden = true;
   const t0 = performance.now();
   const url = URL.createObjectURL(videoFile);
   const v = document.createElement('video');
@@ -363,15 +461,12 @@ $('methodB').addEventListener('click', async () => {
     cancelAnimationFrame(raf);
     rec2.stop();
     await done;
-    outBlob = new Blob(chunks, { type: mime.split(';')[0] });
+    const outBlob = new Blob(chunks, { type: mime.split(';')[0] });
     Object.assign(rec, {
       status: outBlob.size < videoFile.size ? 'ok, smaller' : 'ok but NOT smaller',
       outBytes: outBlob.size, seconds: Math.round((performance.now() - t0) / 100) / 10, sound, format: mime,
     });
-    if (outUrl) URL.revokeObjectURL(outUrl);
-    outUrl = URL.createObjectURL(outBlob);
-    $('outVideo').src = outUrl; $('outVideo').hidden = false; $('playQ').hidden = false;
-    $('saveBtn').disabled = false;
+    addResultCard('methodB', outBlob);
     $('vidOut').textContent = `format: ${mime}\nin: ${fmtMB(rec.inBytes)}\nout: ${fmtMB(rec.outBytes)}\nseconds: ${rec.seconds}\nstatus: ${rec.status}`;
   } catch (err) {
     rec.status = 'failed: ' + (err && err.message || err);
@@ -382,22 +477,24 @@ $('methodB').addEventListener('click', async () => {
     prog.hidden = true;
     refreshReport();
   }
-});
+}));
 
 // ---------- D. save / Photos ----------
-$('saveBtn').addEventListener('click', async () => {
-  if (!outBlob) return;
-  const ext = outBlob.type === 'video/mp4' ? 'mp4' : 'webm';
-  const f = new File([outBlob], 'compressed-test.' + ext, { type: outBlob.type });
+async function saveBlob(method) {
+  const o = outs[method];
+  if (!o) return;
+  const ext = o.blob.type === 'video/mp4' ? 'mp4' : 'webm';
+  const f = new File([o.blob], 'compressed-' + method + '.' + ext, { type: o.blob.type });
+  R.save.savedMethod = method;
   try {
     if (navigator.canShare && navigator.canShare({ files: [f] })) {
       await navigator.share({ files: [f] });
       R.save.shareOpened = true;
-      $('saveOut').textContent = 'share sheet opened';
+      $('saveOut').textContent = 'share sheet opened for ' + method;
     } else {
       R.save.shareOpened = false;
       const a = document.createElement('a');
-      a.href = outUrl; a.download = f.name; a.click();
+      a.href = o.url; a.download = f.name; a.click();
       $('saveOut').textContent = 'share not available, tried download instead';
     }
   } catch (e) {
@@ -405,35 +502,35 @@ $('saveBtn').addEventListener('click', async () => {
     $('saveOut').textContent = String(e.name);
   }
   refreshReport();
-});
+}
 $('photosBtn').addEventListener('click', () => { location.href = 'photos-redirect://'; });
 
-// ---------- tester answers ----------
-function bindAnswers(attr, set) {
-  document.querySelectorAll('[data-' + attr + ']').forEach((b) =>
-    b.addEventListener('click', () => { set(b.dataset[attr === 'saveseen' ? 'saveseen' : attr] === 'yes'); refreshReport(); }));
-}
-bindAnswers('offline', (v) => { R.install.offline = v; });
-bindAnswers('saveseen', (v) => { R.save.saveSeen = v; });
-bindAnswers('landed', (v) => { R.save.landed = v; });
-bindAnswers('photosopened', (v) => { R.save.photosOpened = v; });
-document.querySelectorAll('[data-plays]').forEach((b) => b.addEventListener('click', () => {
-  if (R.video[lastMethod]) R.video[lastMethod].plays = b.dataset.plays === 'yes'; refreshReport();
-}));
-document.querySelectorAll('[data-sound]').forEach((b) => b.addEventListener('click', () => {
-  if (R.video[lastMethod]) R.video[lastMethod].heardSound = b.dataset.sound === 'yes' ? 'yes' : 'no'; refreshReport();
-}));
-
-// ---------- copy ----------
-$('copyBtn').addEventListener('click', async () => {
+// ---------- copy / reset ----------
+async function copyReport(btn) {
   refreshReport();
   const text = $('reportOut').textContent;
-  try { await navigator.clipboard.writeText(text); $('copyBtn').textContent = 'הועתק'; }
+  const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+  try { await navigator.clipboard.writeText(text); btn.textContent = '✓ הועתק'; }
   catch (e) {
     const r = document.createRange(); r.selectNodeContents($('reportOut'));
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    $('copyBtn').textContent = 'סמן והעתק ידנית';
+    $('secR').scrollIntoView();
+    btn.textContent = 'סומן למטה, העתק ידנית';
   }
+  setTimeout(() => { btn.textContent = label; }, 2500);
+}
+document.querySelectorAll('.copyBtn').forEach((b) => b.addEventListener('click', () => copyReport(b)));
+
+let resetArmed = false;
+$('resetBtn').addEventListener('click', (e) => {
+  if (!resetArmed) {
+    resetArmed = true;
+    e.target.textContent = 'לחץ שוב כדי למחוק את כל התוצאות השמורות';
+    setTimeout(() => { resetArmed = false; e.target.textContent = 'התחל מחדש (מוחק תוצאות שמורות)'; }, 5000);
+    return;
+  }
+  if (store) clearState(store);
+  location.reload();
 });
 
 envInit();

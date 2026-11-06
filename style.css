@@ -8,7 +8,6 @@ section { background:var(--card); border:1px solid var(--line); border-radius:12
 button, .btn { display:inline-block; font:inherit; background:var(--accent); color:#fff; border:0; border-radius:10px;
   padding:10px 14px; margin:4px 0; min-height:44px; }
 button:disabled { opacity:.45; }
-button[data-offline],button[data-plays],button[data-sound],button[data-saveseen],button[data-landed],button[data-photosopened] { background:#57606a; min-width:56px; }
 pre { white-space:pre-wrap; word-break:break-word; direction:ltr; text-align:left; background:var(--bg); border:1px solid var(--line);
   border-radius:8px; padding:8px; font-size:13px; margin:8px 0; min-height:1.5em; }
 progress { width:100%; } video { width:100%; max-height:50vh; }
@@ -23,4 +22,11 @@ progress { width:100%; } video { width:100%; max-height:50vh; }
 .paircard .pair img { width:46%; height:auto; aspect-ratio:1; max-height:220px; object-fit:contain; background:#000; }
 .verdicts { display:flex; gap:10px; }
 .verdicts button { flex:1; min-height:56px; font-size:18px; font-weight:700; }
-.verdicts .yes { background:#2da44e; } .verdicts .no { background:#cf222e; }
+.ynbtn { background:#6e7781; min-width:64px; margin:2px 4px; }
+.ynbtn.selected { font-weight:700; outline:3px solid currentColor; outline-offset:1px; }
+.ynbtn.selected.yes { background:#1a7f37; } .ynbtn.selected.no { background:#b62324; }
+.yn { white-space:nowrap; }
+.gray { background:#6e7781; }
+.warn { background:#ffe2e0; color:#82071e; border-radius:8px; padding:10px; font-weight:700; }
+details { margin-top:8px; } summary { padding:8px 0; }
+h3 { font-size:17px; margin:0 0 6px; }

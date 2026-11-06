@@ -16,9 +16,18 @@
 <body>
 <header>
   <h1>בדיקת מנקה התמונות</h1>
-  <p class="note">גרסת הדף: <b id="ver">phase1-run2</b> (אם כתוב אחרת, סגור את האפליקציה לגמרי ופתח שוב)</p>
+  <p class="note">גרסת הדף: <b id="ver">phase1-run3</b> (אם כתוב אחרת, סגור את האפליקציה לגמרי ופתח שוב)</p>
   <p>דף בדיקה בלבד. הוא רק מודד ומציג מספרים. הוא לא מוחק כלום, לא שומר תמונות, ושום דבר לא יוצא מהטלפון.</p>
 </header>
+
+<section id="secTop">
+  <h2>התוצאות שנשמרו</h2>
+  <p id="savedInfo" class="note">עוד לא נשמר כלום.</p>
+  <p id="interruptedInfo" class="warn" hidden></p>
+  <button class="copyBtn">העתק תוצאות</button>
+  <button id="resetBtn" class="gray">התחל מחדש (מוחק תוצאות שמורות)</button>
+  <details><summary>הצג את הדוח</summary><pre id="topReport"></pre></details>
+</section>
 
 <section id="secF">
   <h2>הטלפון והאפליקציה</h2>
@@ -29,16 +38,17 @@
 <section id="secE">
   <h2>התקנה ושימוש בלי אינטרנט</h2>
   <p>לחץ על כפתור השיתוף של Safari ואז "הוסף למסך הבית". פתח את האייקון החדש. אחר כך סגור, העבר למצב טיסה ופתח שוב.</p>
-  <p>האם נפתח בלי אינטרנט?
-    <button data-offline="yes">כן</button> <button data-offline="no">לא</button></p>
+  <p>האם נפתח בלי אינטרנט? <span class="yn" data-key="offline"></span></p>
+  <button class="copyBtn">העתק תוצאות</button>
 </section>
 
 <section id="secA">
-  <h2>א. בחירת תמונות וסרטונים</h2>
-  <p>בחר כמה שיותר תמונות וסרטונים (אפשר לבחור שוב ושוב, הרשימה מצטברת).</p>
-  <label class="btn"><input id="picker" type="file" accept="image/*,video/*" multiple hidden>בחר תמונות וסרטונים</label>
-  <button id="clearPicks">נקה רשימה</button>
+  <h2>א. בחירת תמונות</h2>
+  <p>בחר כמה שיותר תמונות (אפשר לבחור שוב ושוב, הרשימה מצטברת). אחרי הבחירה חכה שהמספרים יופיעו.</p>
+  <label class="btn"><input id="picker" type="file" accept="image/*" multiple hidden>בחר תמונות</label>
+  <button id="clearPicks" class="gray">נקה רשימה</button>
   <pre id="pickOut">עוד לא נבחר כלום.</pre>
+  <button class="copyBtn">העתק תוצאות</button>
 </section>
 
 <section id="secB">
@@ -48,6 +58,7 @@
   <progress id="hashProg" value="0" max="1" hidden></progress>
   <pre id="hashOut"></pre>
   <pre id="hashAllOut"></pre>
+  <button class="copyBtn">העתק תוצאות</button>
 </section>
 
 <section id="secB2">
@@ -57,41 +68,36 @@
   <progress id="lookProg" value="0" max="1" hidden></progress>
   <pre id="lookOut"></pre>
   <div id="pairs"></div>
+  <button class="copyBtn">העתק תוצאות</button>
 </section>
 
 <section id="secC">
   <h2>ג. דחיסת וידאו</h2>
-  <p>בחר סרטון אחד (עדיף של כדקה, מצולם באייפון). השאר את המסך דלוק עד הסוף.</p>
+  <p>עושים בריצה נפרדת, אחרי שהעתקת את תוצאות התמונות. בחר סרטון אחד של כדקה. השאר את המסך דלוק עד הסוף.</p>
   <label class="btn"><input id="videoPicker" type="file" accept="video/*" hidden>בחר סרטון</label>
   <pre id="videoInfo"></pre>
   <button id="methodA" disabled>שיטה א (WebCodecs)</button>
   <button id="methodB" disabled>שיטה ב (הקלטה מחדש)</button>
   <progress id="vidProg" value="0" max="1" hidden></progress>
   <pre id="vidOut"></pre>
-  <video id="outVideo" controls playsinline hidden></video>
-  <p id="playQ" hidden>האם הסרטון החדש מתנגן?
-    <button data-plays="yes">כן</button> <button data-plays="no">לא</button>
-    &nbsp; יש קול?
-    <button data-sound="yes">כן</button> <button data-sound="no">לא</button></p>
+  <div id="videoResults"></div>
+  <button class="copyBtn">העתק תוצאות</button>
 </section>
 
 <section id="secD">
   <h2>ד. שמירה ל"תמונות"</h2>
-  <button id="saveBtn" disabled>שמור את הסרטון החדש</button>
+  <p>כפתור השמירה נמצא בכל כרטיס תוצאה בחלק ג. אחרי הלחיצה ענה:</p>
   <button id="photosBtn">פתח את אפליקציית תמונות</button>
-  <p>אחרי הלחיצה ענה:</p>
-  <p>האם הופיעה האפשרות "שמור סרטון"?
-    <button data-saveseen="yes">כן</button> <button data-saveseen="no">לא</button></p>
-  <p>האם הסרטון הגיע לאפליקציית תמונות?
-    <button data-landed="yes">כן</button> <button data-landed="no">לא</button></p>
-  <p>האם אפליקציית תמונות נפתחה מהכפתור?
-    <button data-photosopened="yes">כן</button> <button data-photosopened="no">לא</button></p>
+  <p>האם הופיעה האפשרות "שמור סרטון"? <span class="yn" data-key="saveSeen"></span></p>
+  <p>האם הסרטון הגיע לאפליקציית תמונות? <span class="yn" data-key="landed"></span></p>
+  <p>האם אפליקציית תמונות נפתחה מהכפתור? <span class="yn" data-key="photosOpened"></span></p>
   <pre id="saveOut"></pre>
+  <button class="copyBtn">העתק תוצאות</button>
 </section>
 
 <section id="secR">
-  <h2>התוצאות</h2>
-  <button id="copyBtn">העתק תוצאות</button>
+  <h2>התוצאות המלאות</h2>
+  <button class="copyBtn">העתק תוצאות</button>
   <pre id="reportOut"></pre>
 </section>
 

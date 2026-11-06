@@ -1,5 +1,7 @@
 // Method A: decode with WebCodecs, re-encode H.264 at lower size, write MP4. All on the device.
 // Spike code: reads the whole file into memory (refuses very large files). Measures, does not polish.
+import { pickAacTrack, describeAudio, findEsds, getAsc } from './lib/aac.js';
+
 const MAX_BYTES = 400 * 1024 * 1024;
 
 function toDesc(mp4box, box) {
@@ -25,13 +27,14 @@ export async function compressA(file, { onProgress = () => {}, targetLongSide = 
   // ---- demux ----
   const mp4 = mp4box.createFile(true);
   const vSamples = [], aSamples = [];
-  let vTrack, aTrack, vDesc, aDesc, rotation = 0;
+  let vTrack, aTrack, vDesc, aDesc, rotation = 0, audioInfo = '', ascHow = '';
   const ready = new Promise((res, rej) => {
     mp4.onError = (e) => rej(new Error('demux: ' + e));
     mp4.onReady = (info) => {
       try {
         vTrack = info.videoTracks[0];
-        aTrack = info.audioTracks[0];
+        aTrack = pickAacTrack(info.audioTracks);
+        audioInfo = describeAudio(info.audioTracks);
         if (!vTrack) throw new Error('no video track');
         const trak = mp4.getTrackById(vTrack.id);
         for (const entry of trak.mdia.minf.stbl.stsd.entries) {
@@ -42,11 +45,18 @@ export async function compressA(file, { onProgress = () => {}, targetLongSide = 
         mp4.setExtractionOptions(vTrack.id, 'v', { nbSamples: 100000 });
         if (aTrack) {
           mp4.setExtractionOptions(aTrack.id, 'a', { nbSamples: 100000 });
+          let esdsBytes = null;
           try {
             const at = mp4.getTrackById(aTrack.id);
-            const e0 = at.mdia.minf.stbl.stsd.entries[0];
-            aDesc = e0.esds.esd.descs[0].descs[0].data; // AudioSpecificConfig
-          } catch (e) { aDesc = null; }
+            const esds = findEsds(at.mdia.minf.stbl.stsd.entries[0]);
+            if (esds) {
+              const s = new mp4box.DataStream(undefined, 0, mp4box.Endianness.BIG_ENDIAN);
+              esds.write(s);
+              esdsBytes = new Uint8Array(s.buffer);
+            }
+          } catch (e) { esdsBytes = null; }
+          const got = getAsc(esdsBytes, aTrack.audio.sample_rate, aTrack.audio.channel_count, aTrack.codec);
+          aDesc = got.asc; ascHow = got.how;
         }
         mp4.onSamples = (id, user, samples) => (user === 'v' ? vSamples : aSamples).push(...samples);
         mp4.start();
@@ -77,11 +87,12 @@ export async function compressA(file, { onProgress = () => {}, targetLongSide = 
   const encSupport = await VideoEncoder.isConfigSupported(encCfg);
   if (!encSupport.supported) throw new Error('encoder does not support H.264 ' + outW + 'x' + outH);
 
-  let audioNote = 'none in source';
+  let audioNote = 'none in source (' + audioInfo + ')';
   const muxOpts = { target: new ArrayBufferTarget(), video: { codec: 'avc', width: outW, height: outH, rotation }, fastStart: 'in-memory' };
   const audioOK = !!(aTrack && aSamples.length && aDesc);
   if (audioOK) muxOpts.audio = { codec: 'aac', numberOfChannels: aTrack.audio.channel_count, sampleRate: aTrack.audio.sample_rate };
-  else if (aTrack) audioNote = 'source has audio but it could not be copied';
+  else if (aTrack) audioNote = `AAC track found but cannot copy: samples=${aSamples.length}, config=${ascHow || 'none'}; tracks: ${audioInfo}`;
+  else if (audioInfo !== 'no audio track') audioNote = `source audio is not AAC, cannot copy into MP4; tracks: ${audioInfo}`;
   const muxer = new Muxer(muxOpts);
 
   // ---- transcode ----
@@ -144,7 +155,7 @@ export async function compressA(file, { onProgress = () => {}, targetLongSide = 
             Number.isFinite(dur) && dur > 0 ? dur : Math.round((1024 * 1e6) / aTrack.audio.sample_rate), { decoderConfig: cfg });
           added++;
         }
-        audioNote = 'copied (' + added + ' packets)';
+        audioNote = 'copied (' + added + ' packets, config ' + ascHow + '; tracks: ' + audioInfo + ')';
       } catch (e) {
         // keep the video; report that sound is incomplete
         audioNote = 'copy failed after ' + added + ' of ' + aSamples.length + ' packets: ' + e.message;
