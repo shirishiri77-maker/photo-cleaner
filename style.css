@@ -1,0 +1,26 @@
+:root { --bg:#fff; --fg:#111; --muted:#555; --card:#f3f5f8; --accent:#1f6feb; --line:#d0d7de; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#aaa; --card:#1c1f24; --accent:#4c8dff; --line:#333; } }
+* { box-sizing: border-box; }
+body { margin:0; padding:16px; padding-top:max(16px, env(safe-area-inset-top)); background:var(--bg); color:var(--fg);
+  font:17px/1.5 -apple-system, system-ui, "Segoe UI", Arial, sans-serif; }
+h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:19px; margin:0 0 8px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:14px 0; }
+button, .btn { display:inline-block; font:inherit; background:var(--accent); color:#fff; border:0; border-radius:10px;
+  padding:10px 14px; margin:4px 0; min-height:44px; }
+button:disabled { opacity:.45; }
+button[data-offline],button[data-plays],button[data-sound],button[data-saveseen],button[data-landed],button[data-photosopened] { background:#57606a; min-width:56px; }
+pre { white-space:pre-wrap; word-break:break-word; direction:ltr; text-align:left; background:var(--bg); border:1px solid var(--line);
+  border-radius:8px; padding:8px; font-size:13px; margin:8px 0; min-height:1.5em; }
+progress { width:100%; } video { width:100%; max-height:50vh; }
+.note { color:var(--muted); font-size:15px; }
+.pair { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+.pair img { width:110px; height:110px; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+
+.pairhead { font-weight:700; background:#fff3cd; color:#533f03; border-radius:8px; padding:10px; position:sticky; top:0; }
+.paircard { border:2px solid var(--accent); border-radius:12px; padding:10px; margin:12px 0; background:var(--bg); }
+.paircard.answered { border-color:#2da44e; opacity:.7; }
+.paircard .pair { display:flex; gap:8px; justify-content:center; }
+.paircard .pair img { width:46%; height:auto; aspect-ratio:1; max-height:220px; object-fit:contain; background:#000; }
+.verdicts { display:flex; gap:10px; }
+.verdicts button { flex:1; min-height:56px; font-size:18px; font-weight:700; }
+.verdicts .yes { background:#2da44e; } .verdicts .no { background:#cf222e; }

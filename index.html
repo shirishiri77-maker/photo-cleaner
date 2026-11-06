@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'none'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>בדיקת מנקה התמונות</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="בדיקה">
+<meta name="theme-color" content="#1f6feb">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>בדיקת מנקה התמונות</h1>
+  <p class="note">גרסת הדף: <b id="ver">phase1-run2</b> (אם כתוב אחרת, סגור את האפליקציה לגמרי ופתח שוב)</p>
+  <p>דף בדיקה בלבד. הוא רק מודד ומציג מספרים. הוא לא מוחק כלום, לא שומר תמונות, ושום דבר לא יוצא מהטלפון.</p>
+</header>
+
+<section id="secF">
+  <h2>הטלפון והאפליקציה</h2>
+  <pre id="envOut">...</pre>
+  <p class="note">המספר "מכסת האפליקציה" הוא המקום שהדפדפן מקצה לאפליקציה הזו בלבד. הוא <b>לא</b> המקום הפנוי בטלפון.</p>
+</section>
+
+<section id="secE">
+  <h2>התקנה ושימוש בלי אינטרנט</h2>
+  <p>לחץ על כפתור השיתוף של Safari ואז "הוסף למסך הבית". פתח את האייקון החדש. אחר כך סגור, העבר למצב טיסה ופתח שוב.</p>
+  <p>האם נפתח בלי אינטרנט?
+    <button data-offline="yes">כן</button> <button data-offline="no">לא</button></p>
+</section>
+
+<section id="secA">
+  <h2>א. בחירת תמונות וסרטונים</h2>
+  <p>בחר כמה שיותר תמונות וסרטונים (אפשר לבחור שוב ושוב, הרשימה מצטברת).</p>
+  <label class="btn"><input id="picker" type="file" accept="image/*,video/*" multiple hidden>בחר תמונות וסרטונים</label>
+  <button id="clearPicks">נקה רשימה</button>
+  <pre id="pickOut">עוד לא נבחר כלום.</pre>
+</section>
+
+<section id="secB">
+  <h2>ב. כפילויות זהות</h2>
+  <button id="hashBtn" disabled>מצא כפילויות זהות</button>
+  <button id="hashAllBtn" disabled>מדוד מהירות על כל התמונות</button>
+  <progress id="hashProg" value="0" max="1" hidden></progress>
+  <pre id="hashOut"></pre>
+  <pre id="hashAllOut"></pre>
+</section>
+
+<section id="secB2">
+  <h2>ב2. מדידת עותקים דומים (מדידה בלבד)</h2>
+  <p>בודק כמה תמונות נראות דומות אבל אינן זהות. זו מדידה בלבד, לא תכונה באפליקציה.</p>
+  <button id="lookBtn" disabled>מדוד עותקים דומים</button>
+  <progress id="lookProg" value="0" max="1" hidden></progress>
+  <pre id="lookOut"></pre>
+  <div id="pairs"></div>
+</section>
+
+<section id="secC">
+  <h2>ג. דחיסת וידאו</h2>
+  <p>בחר סרטון אחד (עדיף של כדקה, מצולם באייפון). השאר את המסך דלוק עד הסוף.</p>
+  <label class="btn"><input id="videoPicker" type="file" accept="video/*" hidden>בחר סרטון</label>
+  <pre id="videoInfo"></pre>
+  <button id="methodA" disabled>שיטה א (WebCodecs)</button>
+  <button id="methodB" disabled>שיטה ב (הקלטה מחדש)</button>
+  <progress id="vidProg" value="0" max="1" hidden></progress>
+  <pre id="vidOut"></pre>
+  <video id="outVideo" controls playsinline hidden></video>
+  <p id="playQ" hidden>האם הסרטון החדש מתנגן?
+    <button data-plays="yes">כן</button> <button data-plays="no">לא</button>
+    &nbsp; יש קול?
+    <button data-sound="yes">כן</button> <button data-sound="no">לא</button></p>
+</section>
+
+<section id="secD">
+  <h2>ד. שמירה ל"תמונות"</h2>
+  <button id="saveBtn" disabled>שמור את הסרטון החדש</button>
+  <button id="photosBtn">פתח את אפליקציית תמונות</button>
+  <p>אחרי הלחיצה ענה:</p>
+  <p>האם הופיעה האפשרות "שמור סרטון"?
+    <button data-saveseen="yes">כן</button> <button data-saveseen="no">לא</button></p>
+  <p>האם הסרטון הגיע לאפליקציית תמונות?
+    <button data-landed="yes">כן</button> <button data-landed="no">לא</button></p>
+  <p>האם אפליקציית תמונות נפתחה מהכפתור?
+    <button data-photosopened="yes">כן</button> <button data-photosopened="no">לא</button></p>
+  <pre id="saveOut"></pre>
+</section>
+
+<section id="secR">
+  <h2>התוצאות</h2>
+  <button id="copyBtn">העתק תוצאות</button>
+  <pre id="reportOut"></pre>
+</section>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>
